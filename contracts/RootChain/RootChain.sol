@@ -37,6 +37,12 @@ contract RootChain {
      */
     mapping(uint256 => childBlock) public childChain;
     mapping(address => uint256) public balances;
+    newDeposit[] bufferedDeposits;
+    struct newDeposit{
+        bytes32 root;
+        address owner;
+        uint256 amt;
+    }
 
     // startExit mechanism
     PriorityQueue exitsQueue;
@@ -58,10 +64,6 @@ contract RootChain {
         uint256 created_at;
     }
 
-    // avoid recomputations
-    bytes32[16] zeroHashes;
-
-
     function RootChain()
         public
     {
@@ -73,12 +75,6 @@ contract RootChain {
         exitsQueue = new PriorityQueue();
 
         minExitBond = 10000; // minimum bond needed to exit.
-
-        bytes32 zeroBytes;
-        for (uint256 i = 0; i < 16; i += 1) { // depth-16 merkle tree
-            zeroHashes[i] = zeroBytes;
-            zeroBytes = keccak256(zeroBytes, zeroBytes);
-        }
     }
 
     /// @param root 32 byte merkleRoot of ChildChain block 
@@ -89,6 +85,18 @@ contract RootChain {
     {
         // ensure finality on previous blocks before submitting another
         require(block.number >= lastParentBlock.add(6));
+
+        // clear deposits
+        while (bufferedDeposits.length != 0) {
+            newDeposit memory currDeposit = bufferedDeposits[bufferedDeposits.length - 1];
+            childChain[currentChildBlock] = childBlock({
+                root: currDeposit.root,
+                created_at: block.timestamp
+            });
+
+            Deposit(currDeposit.owner, currDeposit.amt);
+        }
+
         childChain[currentChildBlock] = childBlock({
             root: root,
             created_at: block.timestamp
@@ -121,18 +129,9 @@ contract RootChain {
         */
 
         // construct the merkle root
-        bytes32 root = keccak256(keccak256(txBytes), new bytes(130));
-        for (i = 0; i < 16; i++) {
-            root = keccak256(root, zeroHashes[i]);
-        }
-
-        childChain[currentChildBlock] = childBlock({
-            root: root,
-            created_at: block.timestamp
-        });
-
-        currentChildBlock = currentChildBlock.add(1);
-        Deposit(txList[6].toAddress(), msg.value);
+        address owner = txList[6].toAddress();
+        bytes32 root = keccak256(txBytes);
+        bufferedDeposits.push(newDeposit(root, owner, msg.value));
     }
 
     function getChildChain(uint256 blockNumber)
