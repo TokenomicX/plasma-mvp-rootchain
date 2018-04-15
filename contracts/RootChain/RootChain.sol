@@ -37,8 +37,8 @@ contract RootChain {
      */
     mapping(uint256 => childBlock) public childChain;
     mapping(address => uint256) public balances;
-    newDeposit[] bufferedDeposits;
-    struct newDeposit{
+    pendingDeposit[] bufferedDeposits;
+    struct pendingDeposit{
         bytes32 root;
         address owner;
         uint256 amt;
@@ -88,13 +88,17 @@ contract RootChain {
 
         // clear deposits
         while (bufferedDeposits.length != 0) {
-            newDeposit memory currDeposit = bufferedDeposits[bufferedDeposits.length - 1];
+            pendingDeposit memory currDeposit = bufferedDeposits[bufferedDeposits.length - 1];
             childChain[currentChildBlock] = childBlock({
                 root: currDeposit.root,
                 created_at: block.timestamp
             });
 
             Deposit(currDeposit.owner, currDeposit.amt);
+
+            // remove the deposit
+            delete bufferedDeposits[bufferedDeposits.length - 1];
+            bufferedDeposits.length = bufferedDeposits.length - 1;
         }
 
         childChain[currentChildBlock] = childBlock({
@@ -131,7 +135,7 @@ contract RootChain {
         // construct the merkle root
         address owner = txList[6].toAddress();
         bytes32 root = keccak256(txBytes);
-        bufferedDeposits.push(newDeposit(root, owner, msg.value));
+        bufferedDeposits.push(pendingDeposit(root, owner, msg.value));
     }
 
     function getChildChain(uint256 blockNumber)
@@ -294,5 +298,34 @@ contract RootChain {
         // will revert the above deletion if fails
         msg.sender.transfer(transferAmount);
         return transferAmount;
+    }
+
+    function withdrawDeposit()
+        public
+        returns (uint256)
+    {
+        pendingDeposit memory temp;
+        uint256 amt;
+        uint i;
+        for (i = 0; i < bufferedDeposits.length; i++) {
+            temp = bufferedDeposits[i];
+            if (temp.owner == msg.sender) {
+                amt = temp.amt;
+                break;
+            }
+        }
+
+        // shift all buffered deposits to the left
+        for (; i < bufferedDeposits.length - 1 ; i++) {
+            bufferedDeposits[i] = bufferedDeposits[i+1];
+        }
+
+        bufferedDeposits.length = bufferedDeposits.length - 1;
+
+        if (!msg.sender.send(amt)) {
+            balances[msg.sender] = balances[msg.sender].add(amt);
+        }
+
+        return amt;
     }
 }
