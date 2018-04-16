@@ -61,7 +61,6 @@ contract RootChain {
 
     // child chain
     uint256 public currentChildBlock;
-    uint256 public validatorBlocks;
     uint256 public lastParentBlock;
     struct childBlock {
         bytes32 root;
@@ -73,7 +72,6 @@ contract RootChain {
     {
         authority = msg.sender;
         currentChildBlock = 1;
-        validatorBlocks = 1;
         depositNonce = 1;
         lastParentBlock = block.number;
 
@@ -94,25 +92,25 @@ contract RootChain {
 
         // clear deposits
         uint256 nonce;
-        bytes32 root;
+        bytes32 header;
         while (bufferedDeposits.currentSize() != 0) {
             nonce = bufferedDeposits.delMin();
-            root = nonceToDeposit[nonce];
+            header = nonceToDeposit[nonce];
             pendingDeposit memory tempDeposit = deposits[root];
 
             // deposit might have been previously withdrawn
             if (tempDeposit.owner != address(0)) {
                 childChain[currentChildBlock] = childBlock({
-                    root: root,
+                    root: header,
                     created_at: block.timestamp
                 });
 
-                Deposit(currDeposit.owner, currDeposit.denom);
+                Deposit(tempDeposit.owner, tempDeposit.denom);
+                currentChildBlock = currentChildBlock.add(1);
             }
 
             // remove the deposit
-            delete deposits[root];
-            currentChildBlock = currentChildBlock.add(1);
+            delete deposits[header];
         }
 
         // reset the nonce if there are no deposits
@@ -125,7 +123,6 @@ contract RootChain {
             created_at: block.timestamp
         });
 
-        validatorBlocks = validatorBlocks.add(1);
         currentChildBlock = currentChildBlock.add(1);
         lastParentBlock = block.number;
     }
@@ -133,11 +130,10 @@ contract RootChain {
     /// @dev txBytes Length 11 RLP encoding of Transaction excluding signatures
     /// @notice owner and value should be encoded in Output 1
     /// @notice hash of txBytes is hashed with a empty signature
-    function deposit(uint blocknum, bytes txBytes)
+    function deposit(bytes txBytes)
         public
         payable
     {
-        require(blocknum == validatorBlocks);
         var txList = txBytes.toRLPItem().toList();
         require(txList.length == 11);
         for(uint256 i = 0; i < 6; i++) {
@@ -163,10 +159,12 @@ contract RootChain {
 
     function getNumOfPendingDeposits()
         public
+        view
         returns (uint256)
     {
         return bufferedDeposits.currentSize();
     }
+
     function getChildChain(uint256 blockNumber)
         public
         view
@@ -336,8 +334,8 @@ contract RootChain {
         pendingDeposit memory temp = deposits[root];
         require(msg.sender == temp.owner); // must own the deposit
 
-        if (!msg.sender.send(temp.amt)) {
-            balances[msg.sender] = balances[msg.sender].add(temp.amt);
+        if (!msg.sender.send(temp.denom)) {
+            balances[msg.sender] = balances[msg.sender].add(temp.denom);
         }
 
         delete deposits[root];
