@@ -39,9 +39,9 @@ contract RootChain {
     mapping(address => uint256) public balances;
 
     // deposits
-    mapping(bytes32 => pendingDeposit) deposits;
-    mapping(uint256 => bytes32) nonceToDeposit;
-    uint256 depositNonce;
+    mapping(bytes32 => pendingDeposit) public deposits;
+    mapping(uint256 => bytes32) public nonceToDeposit;
+    uint256 public depositNonce;
     PriorityQueue bufferedDeposits;
     struct pendingDeposit {
         address owner;
@@ -96,7 +96,7 @@ contract RootChain {
         while (bufferedDeposits.currentSize() != 0) {
             nonce = bufferedDeposits.delMin();
             header = nonceToDeposit[nonce];
-            pendingDeposit memory tempDeposit = deposits[root];
+            pendingDeposit memory tempDeposit = deposits[header];
 
             // deposit might have been previously withdrawn
             if (tempDeposit.owner != address(0)) {

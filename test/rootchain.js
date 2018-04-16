@@ -4,10 +4,11 @@ let assert = require('chai').assert;
 
 let { 
     to,
-    createAndSubmitTX,
+    createAndDepositTX,
     proofForDepositBlock,
     hexToBinary,
     zeroHashes,
+    emptyBlock
 } = require('./utilities.js');
 
 let RootChain = artifacts.require("RootChain");
@@ -50,14 +51,30 @@ contract('RootChain', async (accounts) => {
     });
 
     it("Depositing Funds", async () => {
-        let depositAmount = 50000;
-        let txBytes = RLP.encode([0, 0, 0, 0, 0, 0, accounts[2], depositAmount, 0, 0, 0]);
-        let validatorBlock = parseInt(await rootchain.validatorBlocks.call())
-        let prev =  parseInt(await rootchain.currentChildBlock.call());
+        let blockNum, blockHeader, rest;
+        [blockNum, blockHeader, ...rest] = await createAndDepositTX(rootchain, accounts[2]);
 
-        await rootchain.deposit(validatorBlock, txBytes.toString('binary'), {from: accounts[2], value: depositAmount});
-        //let numDeposits = await rootchain.getNumOfPendingDeposits.call();
-        //assert.equal(numDeposits, 1, "Deposit is not pending");
+        // finality
+        for (i = 0; i < 5; i++) {
+            await web3.eth.sendTransaction({from: authority, 'to': accounts[1], value: 100});
+        }
+
+        console.log('retrieving number of deposits');
+        let numDeposits = await rootchain.getNumOfPendingDeposits.call();
+        assert.equal(numDeposits, 1, "Deposit is not pending");
+
+        // submit the block to clear deposits
+        console.log('submitting empty block');
+        await rootchain.submitBlock(hexToBinary(emptyBlock))
+        console.log('finished submitting block');
+        numDeposits = parseInt(await rootchain.getNumOfPendingDeposits.call());
+        assert.equal(numDeposits, 0, "All Deposits should have been cleared");
+
+        let currBlockNum = parseInt(await rootchain.currentChildBlock.call());
+        let root = (await rootchain.getChildChain.call(currBlockNum - 2))[0];
+        let nonce = parseInt(await rootchain.depositNonce.call());
+        assert.equal(nonce, 1, "Nonce was not reset after the queue was emptied");
+        assert.equal(blockHeader, root, "Deposit root and child chain root mismatch");
     });
 
     it("Deposit then submit block", async () => {
@@ -164,8 +181,8 @@ contract('RootChain', async (accounts) => {
     it("Start an exit", async () => {
         // submit a deposit
         let blockNum, confirmHash, confirmSignature, txBytes, txHash, sigs, blockHeader;
-        [blockNum, confirmHash, confirmSignature,
-            txBytes, txHash, sigs, blockHeader] = await createAndSubmitTX(rootchain, accounts[2]);
+        [blockNum, blockHeader, confirmHash,
+            confirmSignature, txBytes, txHash, sigs] = await createAndDepositTX(rootchain, accounts[2]);
 
         // start the exit
         let txPos = [blockNum, 0, 0];
@@ -183,8 +200,8 @@ contract('RootChain', async (accounts) => {
     it("Try to exit with invalid parameters", async () => {
         // submit a deposit
         let blockNum, confirmHash, confirmSignature, txBytes, txHash, sigs, blockHeader;
-        [blockNum, confirmHash, confirmSignature,
-            txBytes, txHash, sigs, blockHeader] = await createAndSubmitTX(rootchain, accounts[2]);
+        [blockNum, blockHeader, confirmHash,
+            confirmSignature, txBytes, txHash, sigs, blockHeader] = await createAndDepositTX(rootchain, accounts[2]);
 
         // start the exit
         let txPos = [blockNum, 0, 0];
@@ -206,7 +223,7 @@ contract('RootChain', async (accounts) => {
 
     it("Challenge an exit with a correct/incorrect confirm sigs", async () => {
         let blockNum, rest;
-        [blockNum, ...rest] = await createAndSubmitTX(rootchain, accounts[2]);
+        [blockNum, ...rest] = await createAndDepositTX(rootchain, accounts[2]);
 
         // exit this transaction
         let exitSigs = new Buffer(130).toString('hex') + rest[1].slice(2) + new Buffer(65).toString('hex');
@@ -260,7 +277,7 @@ contract('RootChain', async (accounts) => {
 
     it("Start exit and finalize after a week", async () => {
         let blockNum, rest;
-        [blockNum, ...rest] = await createAndSubmitTX(rootchain, accounts[2]);
+        [blockNum, ...rest] = await createAndDepositTX(rootchain, accounts[2]);
 
         /*
          * authority will eat up the gas cost in the finalize exit

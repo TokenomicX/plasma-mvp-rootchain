@@ -17,24 +17,23 @@ let hexToBinary = function(value) {
     return Buffer.from(value, 'hex').toString('binary');
 };
 
-let createAndSubmitTX = async function(rootchain, address) {
+let createAndDepositTX = async function(rootchain, address) {
     // submit a deposit
     let blockNum = (await rootchain.currentChildBlock.call()).toNumber();
     let txBytes = RLP.encode([0, 0, 0, 0, 0, 0, address, 5000, 0, 0, 0]);
-    let validatorBlock = await rootchain.validatorBlocks.call();
-    await rootchain.deposit(validatorBlock, txBytes.toString('binary'), {from: address, value: 5000});
-
-    // construct the confirm sig
-    // Remove all 0x prefixes from hex strings
-    let blockHeader = (await rootchain.getChildChain.call(blockNum))[0];
     let txHash = web3.sha3(txBytes.toString('hex'), {encoding: 'hex'});
     let sigs = (new Buffer(130)).toString('hex');
+    let merkleHash = web3.sha3(txHash + sigs, {encoding: 'hex'});
+
+    await rootchain.deposit(txBytes.toString('binary'), {from: address, value: 5000});
+
+    let blockHeader = web3.sha3(txBytes.toString('hex'), {encoding: 'hex'});
 
     // create the confirm sig
     let confirmHash = web3.sha3(txHash.slice(2) + sigs + blockHeader.slice(2), {encoding: 'hex'});
     let confirmSignature = await web3.eth.sign(address, confirmHash);
 
-    return [blockNum, confirmHash, confirmSignature, txBytes, txHash, sigs, blockHeader];
+    return [blockNum, blockHeader, confirmHash, confirmSignature, txBytes, txHash, sigs];
 };
 
 // 512 bytes
@@ -57,11 +56,14 @@ let zeroHashes = [ '000000000000000000000000000000000000000000000000000000000000
   '5c67add7c6caf302256adedf7ab114da0acfe870d449a3a489f781d659e8becc',
   'da7bce9f4e8618b6bd2f4132ce798cdc7a60e7e1460a7299e3c6342a579626d2' ];
 
+let emptyBlock = '2733e50f526ec2fa19a22b31e8ed50f23cd1fdf94c9154ed3a7609a2f1ff981f'
+
 module.exports = {
     to,
-    createAndSubmitTX,
+    createAndDepositTX,
     proofForDepositBlock,
     hexToBinary,
     zeroHashes,
+    emptyBlock
 };
 
