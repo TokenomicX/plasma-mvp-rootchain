@@ -37,11 +37,15 @@ contract RootChain {
      */
     mapping(uint256 => childBlock) public childChain;
     mapping(address => uint256) public balances;
-    pendingDeposit[] bufferedDeposits;
-    struct pendingDeposit{
-        bytes32 root;
+
+    // deposits
+    mapping(bytes32 => pendingDeposit) deposits;
+    mapping(uint256 => bytes32) nonceToDeposit;
+    uint256 depositNonce;
+    PriorityQueue bufferedDeposits;
+    struct pendingDeposit {
         address owner;
-        uint256 amt;
+        uint256 denom;
     }
 
     // startExit mechanism
@@ -70,9 +74,11 @@ contract RootChain {
         authority = msg.sender;
         currentChildBlock = 1;
         validatorBlocks = 1;
+        depositNonce = 1;
         lastParentBlock = block.number;
 
         exitsQueue = new PriorityQueue();
+        bufferedDeposits = new PriorityQueue();
 
         minExitBond = 10000; // minimum bond needed to exit.
     }
@@ -87,18 +93,31 @@ contract RootChain {
         require(block.number >= lastParentBlock.add(6));
 
         // clear deposits
-        while (bufferedDeposits.length != 0) {
-            pendingDeposit memory currDeposit = bufferedDeposits[bufferedDeposits.length - 1];
-            childChain[currentChildBlock] = childBlock({
-                root: currDeposit.root,
-                created_at: block.timestamp
-            });
+        uint256 nonce;
+        bytes32 root;
+        while (bufferedDeposits.currentSize() != 0) {
+            nonce = bufferedDeposits.delMin();
+            root = nonceToDeposit[nonce];
+            pendingDeposit memory tempDeposit = deposits[root];
 
-            Deposit(currDeposit.owner, currDeposit.amt);
+            // deposit might have been previously withdrawn
+            if (tempDeposit.owner != address(0)) {
+                childChain[currentChildBlock] = childBlock({
+                    root: root,
+                    created_at: block.timestamp
+                });
+
+                Deposit(currDeposit.owner, currDeposit.denom);
+            }
 
             // remove the deposit
-            delete bufferedDeposits[bufferedDeposits.length - 1];
-            bufferedDeposits.length = bufferedDeposits.length - 1;
+            delete deposits[root];
+            currentChildBlock = currentChildBlock.add(1);
+        }
+
+        // reset the nonce if there are no deposits
+        if (bufferedDeposits.currentSize() == 0) {
+            depositNonce = 1;
         }
 
         childChain[currentChildBlock] = childBlock({
@@ -133,11 +152,21 @@ contract RootChain {
         */
 
         // construct the merkle root
-        address owner = txList[6].toAddress();
         bytes32 root = keccak256(txBytes);
-        bufferedDeposits.push(pendingDeposit(root, owner, msg.value));
+        address owner = txList[6].toAddress();
+
+        bufferedDeposits.insert(depositNonce);
+        nonceToDeposit[depositNonce] = root;
+        deposits[root] = pendingDeposit(owner, msg.value);
+        depositNonce = depositNonce.add(1);
     }
 
+    function getNumOfPendingDeposits()
+        public
+        returns (uint256)
+    {
+        return bufferedDeposits.currentSize();
+    }
     function getChildChain(uint256 blockNumber)
         public
         view
@@ -300,32 +329,17 @@ contract RootChain {
         return transferAmount;
     }
 
-    function withdrawDeposit()
+    function withdrawDeposit(bytes32 root)
         public
         returns (uint256)
     {
-        pendingDeposit memory temp;
-        uint256 amt;
-        uint i;
-        for (i = 0; i < bufferedDeposits.length; i++) {
-            temp = bufferedDeposits[i];
-            if (temp.owner == msg.sender) {
-                amt = temp.amt;
-                break;
-            }
+        pendingDeposit memory temp = deposits[root];
+        require(msg.sender == temp.owner); // must own the deposit
+
+        if (!msg.sender.send(temp.amt)) {
+            balances[msg.sender] = balances[msg.sender].add(temp.amt);
         }
 
-        // shift all buffered deposits to the left
-        for (; i < bufferedDeposits.length - 1 ; i++) {
-            bufferedDeposits[i] = bufferedDeposits[i+1];
-        }
-
-        bufferedDeposits.length = bufferedDeposits.length - 1;
-
-        if (!msg.sender.send(amt)) {
-            balances[msg.sender] = balances[msg.sender].add(amt);
-        }
-
-        return amt;
+        delete deposits[root];
     }
 }
