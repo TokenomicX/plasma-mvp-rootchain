@@ -31,7 +31,6 @@ contract('RootChain', async (accounts) => {
 
     it("Submit block from authority", async () => {
         let curr = parseInt(await rootchain.currentChildBlock.call());
-        let currValidatorBlocks = parseInt(await rootchain.validatorBlocks.call());
 
         // waiting at least 5 root chain blocks before submitting a block
         for (i = 0; i < 5; i++) {
@@ -41,103 +40,70 @@ contract('RootChain', async (accounts) => {
         let blockRoot = '2984748479872';
         await rootchain.submitBlock(web3.fromAscii(blockRoot));
         let next = parseInt(await rootchain.currentChildBlock.call());
-        let validatorBlocks = parseInt(await rootchain.validatorBlocks.call());
 
         assert.equal(curr + 1, next, "Child block did not increment");
-        assert.equal(currValidatorBlocks + 1, validatorBlocks, "Validator Blocks did not increment");
 
         let childBlock = await rootchain.getChildChain.call(curr);
         assert.equal(web3.toUtf8(childBlock[0]), blockRoot, 'Child block merkle root does not match submitted merkle root.');
     });
 
-    it("Depositing Funds", async () => {
+    it("Depositing Funds, submitBlock to clear", async () => {
         let blockNum, blockHeader, rest;
         [blockNum, blockHeader, ...rest] = await createAndDepositTX(rootchain, accounts[2]);
+        console.log('deposited tx')
 
         // finality
         for (i = 0; i < 5; i++) {
             await web3.eth.sendTransaction({from: authority, 'to': accounts[1], value: 100});
         }
 
-        console.log('retrieving number of deposits');
+        console.log('finality')
+
+        let nonce = parseInt(await rootchain.depositNonce.call());
+        assert.equal(nonce, 2, "depositNonce did not increment on the root chain");
+        console.log('nonce found');
+
+        // should be in the queue
         let numDeposits = await rootchain.getNumOfPendingDeposits.call();
         assert.equal(numDeposits, 1, "Deposit is not pending");
+        console.log('numDeposits found');
 
         // submit the block to clear deposits
-        console.log('submitting empty block');
         await rootchain.submitBlock(hexToBinary(emptyBlock))
-        console.log('finished submitting block');
+        console.log('submit block');
         numDeposits = parseInt(await rootchain.getNumOfPendingDeposits.call());
         assert.equal(numDeposits, 0, "All Deposits should have been cleared");
 
         let currBlockNum = parseInt(await rootchain.currentChildBlock.call());
         let root = (await rootchain.getChildChain.call(currBlockNum - 2))[0];
-        let nonce = parseInt(await rootchain.depositNonce.call());
+        nonce = parseInt(await rootchain.depositNonce.call());
         assert.equal(nonce, 1, "Nonce was not reset after the queue was emptied");
         assert.equal(blockHeader, root, "Deposit root and child chain root mismatch");
     });
 
-    it("Deposit then submit block", async () => {
-        let depositAmount = 50000;
-        let txBytes = RLP.encode([0, 0, 0, 0, 0, 0, accounts[2], depositAmount, 0, 0, 0]);
-        let prevBlockNum = parseInt(await rootchain.currentChildBlock.call());
-        let validatorBlock = parseInt(await rootchain.validatorBlocks.call());
-
-        await rootchain.deposit(validatorBlock, txBytes.toString('binary'), {from: accounts[2], value: depositAmount});
-        let currBlockNum = parseInt(await rootchain.currentChildBlock.call());
-
-        assert.equal(prevBlockNum + 1, currBlockNum, "Child block did not increment after Deposit.");
-
-        for (i = 0; i < 5; i++) {
-            await web3.eth.sendTransaction({from: authority, 'to': accounts[1], value: 100});
-        }
-
-        let blockRoot = '2984748479872';
-        await rootchain.submitBlock(web3.fromAscii(blockRoot));
-        let nextBlockNum = parseInt(await rootchain.currentChildBlock.call());
-        assert.equal(currBlockNum + 1, nextBlockNum, "Child block did not increment after submitting a block.");
-    });
-
     it("Invalid deposits", async () => {
-        let validatorBlock = parseInt(await rootchain.validatorBlocks.call())
         let err;
 
+        // msg.value and denom mismatch
         let txBytes1 = RLP.encode([0, 0, 0, 0, 0, 0, accounts[2], 50000, 0, 0, 0]);
-        [err] = await to(rootchain.deposit(validatorBlock, txBytes1.toString('binary'), {from: accounts[2], value: 50}));
+        [err] = await to(rootchain.deposit(txBytes1.toString('binary'), {from: accounts[2], value: 50}));
         if (!err) {
             assert.fail("Invalid deposit, did not revert");
         }
 
+        // second output must be zero
         let txBytes2 = RLP.encode([0, 0, 0, 0, 0, 0, accounts[2], 50000, accounts[3], 10000, 0]);
-        [err] = await to(rootchain.deposit(validatorBlock, txBytes2.toString('binary'), {from: accounts[2], value: 50000}));
+        [err] = await to(rootchain.deposit(txBytes2.toString('binary'), {from: accounts[2], value: 50000}));
         if (!err) {
             assert.fail("Invalid deposit, did not revert");
         }
 
+        // blknum, txIndex should be zero
         let txBytes3 = RLP.encode([3, 5, 0, 0, 0, 0, accounts[2], 50000, 0, 0, 0]);
-        [err] = await to(rootchain.deposit(validatorBlock, txBytes3.toString('binary'), {from: accounts[2], value: 50000}));
+        [err] = await to(rootchain.deposit(txBytes3.toString('binary'), {from: accounts[2], value: 50000}));
         if (!err) {
             assert.fail("Invalid deposit, did not revert");
         }
-
-    });
-
-    it("Deposit after unseen submitted block", async () => {
-        let txBytes = RLP.encode([0, 0, 0, 0, 0, 0, accounts[2], 50000, 0, 0, 0]);
-        let validatorBlock = parseInt(await rootchain.validatorBlocks.call())
-
-        for (i = 0; i < 5; i++) {
-            await web3.eth.sendTransaction({from: authority, 'to': accounts[1], value: 100});
-        }
-        await rootchain.submitBlock('578484785954');
-        let newValidatorBlock = parseInt(await rootchain.validatorBlocks.call())
-        assert.equal(validatorBlock + 1, newValidatorBlock, "Validator Block doesn't increment")
-
-        let err;
-        [err] = await to(rootchain.deposit(validatorBlock, txBytes.toString('binary'), {from: accounts[2], value: 50000}))
-
-        if(!err)
-            assert.fail("Allowed deposit to be added after unseen block")
 
     });
 

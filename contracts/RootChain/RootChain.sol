@@ -67,6 +67,9 @@ contract RootChain {
         uint256 created_at;
     }
 
+    // avoid recomputations
+    bytes32[16] zeroHashes;
+
     function RootChain()
         public
     {
@@ -79,6 +82,12 @@ contract RootChain {
         bufferedDeposits = new PriorityQueue();
 
         minExitBond = 10000; // minimum bond needed to exit.
+
+        bytes32 zeroBytes;
+        for (uint256 i = 0; i < 16; i += 1) { // depth-16 merkle tree
+            zeroHashes[i] = zeroBytes;
+            zeroBytes = keccak256(zeroBytes, zeroBytes);
+        }
     }
 
     /// @param root 32 byte merkleRoot of ChildChain block 
@@ -93,10 +102,11 @@ contract RootChain {
         // clear deposits
         uint256 nonce;
         bytes32 header;
+        pendingDeposit memory tempDeposit;
         while (bufferedDeposits.currentSize() != 0) {
             nonce = bufferedDeposits.delMin();
             header = nonceToDeposit[nonce];
-            pendingDeposit memory tempDeposit = deposits[header];
+            tempDeposit = deposits[header];
 
             // deposit might have been previously withdrawn
             if (tempDeposit.owner != address(0)) {
@@ -141,6 +151,7 @@ contract RootChain {
         }
         require(txList[7].toUint() == msg.value);
         require(txList[9].toUint() == 0); // second output value must be zero
+        require(txList[8].toAddress() == address(0));
 
         /*
             The signatures are kept seperate from the txBytes to avoid having to
@@ -148,8 +159,9 @@ contract RootChain {
         */
 
         // construct the merkle root
-        bytes32 root = keccak256(txBytes);
         address owner = txList[6].toAddress();
+        bytes32 root = keccak256(txBytes);
+
 
         bufferedDeposits.insert(depositNonce);
         nonceToDeposit[depositNonce] = root;
@@ -197,10 +209,15 @@ contract RootChain {
         require(msg.sender == txList[6 + 2 * txPos[2]].toAddress());
         require(msg.value == minExitBond);
 
-
         // creating the correct merkle leaf
         bytes32 txHash = keccak256(txBytes);
-        bytes32 merkleHash = keccak256(txHash, ByteUtils.slice(sigs, 0, 130));
+        bytes32 merkleHash;
+        if (txPos[0] == 0) {
+            merkleHash = txHash;
+        } else {
+            merkleHash = keccak256(txHash, ByteUtils.slice(sigs, 0, 130));
+        }
+
         require(Validate.checkSigs(txHash, childChain[txPos[0]].root, txList[0].toUint(), txList[3].toUint(), sigs));
         require(merkleHash.checkMembership(txPos[1], childChain[txPos[0]].root, proof));
 
@@ -219,10 +236,8 @@ contract RootChain {
         });
     }
 
-    /// @param txPos [0] Plasma block number in which the challenger's transaction occured
-    /// @param txPos [1] Transaction Index within the block
-    /// @param txPos [2] Output Index within the transaction (either 0 or 1)
-    /// @param newTxPos  Same as the above but the pos of the uxto created by the spend tx
+    /// @param txPos [blocknum, tx index, output index] of spent utxo
+    /// @param newTxPos  Same as the above for the new uxto
     function challengeExit(uint256[3] txPos, uint256[3] newTxPos, bytes txBytes, bytes proof, bytes sigs, bytes confirmationSig)
         public
     {
@@ -315,9 +330,7 @@ contract RootChain {
         public
         returns (uint256)
     {
-        if (balances[msg.sender] == 0) {
-            return 0;
-        }
+        require(balances[msg.sender] != 0);
 
         uint256 transferAmount = balances[msg.sender];
         delete balances[msg.sender];
@@ -327,12 +340,13 @@ contract RootChain {
         return transferAmount;
     }
 
+    /// @param root sha3 hash of the txBytes
     function withdrawDeposit(bytes32 root)
         public
         returns (uint256)
     {
         pendingDeposit memory temp = deposits[root];
-        require(msg.sender == temp.owner); // must own the deposit
+        require(msg.sender == temp.owner); // deposit my exist and correct owner
 
         if (!msg.sender.send(temp.denom)) {
             balances[msg.sender] = balances[msg.sender].add(temp.denom);

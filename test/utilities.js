@@ -27,7 +27,11 @@ let createAndDepositTX = async function(rootchain, address) {
 
     await rootchain.deposit(txBytes.toString('binary'), {from: address, value: 5000});
 
-    let blockHeader = web3.sha3(txBytes.toString('hex'), {encoding: 'hex'});
+    //let blockHeader = web3.sha3(txBytes.toString('hex'), {encoding: 'hex'});
+    let blockHeader = txHash;
+    for (let i = 0; i < 16; i++) {
+        blockHeader = web3.sha3(blockHeader + zeroHashes[i], {encoding: 'hex'}).slice(2)
+    }
 
     // create the confirm sig
     let confirmHash = web3.sha3(txHash.slice(2) + sigs + blockHeader.slice(2), {encoding: 'hex'});
