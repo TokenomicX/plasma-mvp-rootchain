@@ -19,8 +19,10 @@ let hexToBinary = function(value) {
 
 let createAndDepositTX = async function(rootchain, address) {
     // submit a deposit
-    let blockNum = (await rootchain.currentChildBlock.call()).toNumber();
-    let txBytes = RLP.encode([0, 0, 0, 0, 0, 0, address, 5000, 0, 0, 0]);
+    let blockNum = (await rootchain.getDepositBlock.call()).toNumber();
+    let txBytes = RLP.encode([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, address, 5000, 0, 0, 0]);
+    await rootchain.deposit(validatorBlock, txBytes.toString('binary'), {from: address, value: 5000});
+
     let txHash = web3.sha3(txBytes.toString('hex'), {encoding: 'hex'});
     let sigs = (new Buffer(130)).toString('hex');
     let merkleHash = web3.sha3(txHash + sigs, {encoding: 'hex'});

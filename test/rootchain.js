@@ -40,8 +40,9 @@ contract('RootChain', async (accounts) => {
         let blockRoot = '2984748479872';
         await rootchain.submitBlock(web3.fromAscii(blockRoot));
         let next = parseInt(await rootchain.currentChildBlock.call());
+        let interval = parseInt(await rootchain.childBlockInterval.call())
 
-        assert.equal(curr + 1, next, "Child block did not increment");
+        assert.equal(curr + interval, next, "Child block did not increment");
 
         let childBlock = await rootchain.getChildChain.call(curr);
         assert.equal(web3.toUtf8(childBlock[0]), blockRoot, 'Child block merkle root does not match submitted merkle root.');
@@ -82,29 +83,28 @@ contract('RootChain', async (accounts) => {
     });
 
     it("Invalid deposits", async () => {
+        let validatorBlock = parseInt(await rootchain.currentChildBlock.call())
         let err;
 
-        // msg.value and denom mismatch
-        let txBytes1 = RLP.encode([0, 0, 0, 0, 0, 0, accounts[2], 50000, 0, 0, 0]);
-        [err] = await to(rootchain.deposit(txBytes1.toString('binary'), {from: accounts[2], value: 50}));
+        let txBytes1 = RLP.encode([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, accounts[2], 50000, 0, 0, 0]);
+        [err] = await to(rootchain.deposit(validatorBlock, txBytes1.toString('binary'), {from: accounts[2], value: 50}));
         if (!err) {
             assert.fail("Invalid deposit, did not revert");
         }
 
         // second output must be zero
-        let txBytes2 = RLP.encode([0, 0, 0, 0, 0, 0, accounts[2], 50000, accounts[3], 10000, 0]);
-        [err] = await to(rootchain.deposit(txBytes2.toString('binary'), {from: accounts[2], value: 50000}));
+        let txBytes2 = RLP.encode([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, accounts[2], 50000, accounts[3], 10000, 0]);
+        [err] = await to(rootchain.deposit(validatorBlock, txBytes2.toString('binary'), {from: accounts[2], value: 50000}));
         if (!err) {
             assert.fail("Invalid deposit, did not revert");
         }
 
         // blknum, txIndex should be zero
-        let txBytes3 = RLP.encode([3, 5, 0, 0, 0, 0, accounts[2], 50000, 0, 0, 0]);
-        [err] = await to(rootchain.deposit(txBytes3.toString('binary'), {from: accounts[2], value: 50000}));
+        let txBytes3 = RLP.encode([3, 5, 0, 0, 0, 0, 0, 0, 0, 0, accounts[2], 50000, 0, 0, 0]);
+        [err] = await to(rootchain.deposit(validatorBlock, txBytes3.toString('binary'), {from: accounts[2], value: 50000}));
         if (!err) {
             assert.fail("Invalid deposit, did not revert");
         }
-
     });
 
     it("Submit block from someone other than authority", async () => {
@@ -153,6 +153,7 @@ contract('RootChain', async (accounts) => {
         // start the exit
         let txPos = [blockNum, 0, 0];
         let exitSigs = new Buffer(130).toString('hex') + confirmSignature.slice(2) + new Buffer(65).toString('hex');
+        
         await rootchain.startExit(txPos, txBytes.toString('binary'), 
             hexToBinary(proofForDepositBlock), hexToBinary(exitSigs), {from: accounts[2], value: minExitBond });
 
@@ -198,7 +199,7 @@ contract('RootChain', async (accounts) => {
 
 
         // transact accounts[2] => accounts[3]. DOUBLE SPEND (earlier exit)
-        let txBytes = RLP.encode([blockNum, 0, 0, 0, 0, 0, accounts[3], 5000, 0, 0, 0]);
+        let txBytes = RLP.encode([blockNum, 0, 0, 5000, 0, 0, 0, 0, 0, 0, accounts[3], 5000, 0, 0, 0]);
         let txHash = web3.sha3(txBytes.toString('hex'), {encoding: 'hex'});
         let sigs = await web3.eth.sign(accounts[2], txHash);
         sigs += new Buffer(65).toString('hex');
@@ -210,16 +211,18 @@ contract('RootChain', async (accounts) => {
           computedRoot = web3.sha3(computedRoot + zeroHashes[i], 
             {encoding: 'hex'}).slice(2)
         }
+        let newBlockNum = await rootchain.currentChildBlock.call()
         await rootchain.submitBlock(hexToBinary(computedRoot));
 
         // create the right confirm sig
         let confirmHash = web3.sha3(txHash.slice(2) + sigs.slice(2) + computedRoot, {encoding: 'hex'});
         let confirmSignature = await web3.eth.sign(accounts[2], confirmHash);
-        let incorrectConfirmSig = await web3.eth.sign(accounts[2], "0x6969");
+        let incorrectConfirmSig = await web3.eth.sign(accounts[2], "0x1234");
+
 
         // challenge incorrectly
         let err
-        [err] = await to(rootchain.challengeExit([blockNum, 0, 0], [blockNum+1, 0, 0],
+        [err] = await to(rootchain.challengeExit([blockNum, 0, 0], [newBlockNum, 0, 0],
             txBytes.toString('binary'), hexToBinary(proofForDepositBlock),
             hexToBinary(sigs), hexToBinary(incorrectConfirmSig), {from: accounts[3]}));
         if (!err) {
@@ -228,7 +231,7 @@ contract('RootChain', async (accounts) => {
 
         // challenge correctly
         let oldBal = (await rootchain.getBalance.call({from: accounts[3]})).toNumber();
-        await rootchain.challengeExit([blockNum, 0, 0], [blockNum+1, 0, 0],
+        await rootchain.challengeExit([blockNum, 0, 0], [newBlockNum, 0, 0],
             txBytes.toString('binary'), hexToBinary(proofForDepositBlock),
             hexToBinary(sigs), hexToBinary(confirmSignature), {from: accounts[3]});
 
