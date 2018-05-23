@@ -279,10 +279,15 @@ contract('RootChain', async (accounts) => {
          * revert from occuring if gas runs out
          */
 
+        let numExits = (await rootchain.PQSize.call({from: accounts[2]})).toNumber();
+
         // fast forward and finalize any exits from previous tests
         await web3.currentProvider.send({jsonrpc: "2.0", method: "evm_increaseTime", params: [804800], id: 0});
         await web3.currentProvider.send({jsonrpc: "2.0", method: "evm_mine", params: [], id: 0});
-        await rootchain.finalizeExits({from: authority});
+        let result = await rootchain.finalizeExits(numExits, {from: authority});
+
+        let gasUsed = Number(web3.eth.getTransactionReceipt(result.receipt.transactionHash).gasUsed);
+        console.log(gasUsed);
 
         // start a new exit
         let exitSigs = new Buffer(130).toString('hex') + rest[1].slice(2) + new Buffer(65).toString('hex');
@@ -305,7 +310,10 @@ contract('RootChain', async (accounts) => {
         // finalize
         let oldBal = (await rootchain.getBalance.call({from: accounts[2]})).toNumber();
         let oldChildChainBalance = (await rootchain.childChainBalance()).toNumber();
-        await rootchain.finalizeExits({from: authority});
+        result = await rootchain.finalizeExits(1, {from: authority});
+
+        gasUsed = Number(web3.eth.getTransactionReceipt(result.receipt.transactionHash).gasUsed);
+        console.log(gasUsed);
 
         let balance = (await rootchain.getBalance.call({from: accounts[2]})).toNumber();
 
@@ -350,7 +358,7 @@ contract('RootChain', async (accounts) => {
       // fast forward and finalize any exits from previous tests
       await web3.currentProvider.send({jsonrpc: "2.0", method: "evm_increaseTime", params: [804800], id: 0});
       await web3.currentProvider.send({jsonrpc: "2.0", method: "evm_mine", params: [], id: 0});
-      await rootchain.finalizeExits({from: authority});
+      await rootchain.finalizeExits(10, {from: authority});
 
       let exitSigs = new Buffer(130).toString('hex') + rest[1].slice(2) + new Buffer(65).toString('hex');
 
@@ -358,6 +366,7 @@ contract('RootChain', async (accounts) => {
       let i;
       for (i = 0; i < 3; i++) {
         // start a new exit
+
         await rootchain.startExit([blockNum, 0, 0], rest[2].toString('binary'),
             hexToBinary(proofForDepositBlock), hexToBinary(exitSigs), {from: accounts[2], value: minExitBond });
         let priority = 1000000000*blockNum;
@@ -374,10 +383,17 @@ contract('RootChain', async (accounts) => {
         let diff = (currTime - oldTime) - 804800;
         assert.isBelow(diff, 3, "Block time was not fast forwarded by 1 week"); // 3 sec error for mining the next block
 
+        let numExitsBefore = (await rootchain.PQSize.call({from: accounts[2]})).toNumber();
+
         // finalize
         let oldBal = (await rootchain.getBalance.call({from: accounts[2]})).toNumber();
         let oldChildChainBalance = (await rootchain.childChainBalance()).toNumber();
-        await rootchain.finalizeExits({from: authority});
+        let result = await rootchain.finalizeExits(1, {from: authority});
+
+        let numExitsAfter = (await rootchain.PQSize.call({from: accounts[2]})).toNumber();
+
+        let gasUsed = Number(web3.eth.getTransactionReceipt(result.receipt.transactionHash).gasUsed);
+        console.log(gasUsed, numExitsBefore, numExitsAfter);
 
         let balance = (await rootchain.getBalance.call({from: accounts[2]})).toNumber();
 
@@ -415,7 +431,10 @@ contract('RootChain', async (accounts) => {
       // finalize
       let oldBal = (await rootchain.getBalance.call({from: accounts[2]})).toNumber();
       let oldChildChainBalance = (await rootchain.childChainBalance()).toNumber();
-      await rootchain.finalizeExits({from: authority});
+      let result = await rootchain.finalizeExits(1, {from: authority});
+
+      let gasUsed = Number(web3.eth.getTransactionReceipt(result.receipt.transactionHash).gasUsed);
+      console.log(gasUsed);
 
       let balance = (await rootchain.getBalance.call({from: accounts[2]})).toNumber();
 

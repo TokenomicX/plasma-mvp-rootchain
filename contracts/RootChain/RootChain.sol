@@ -1,4 +1,4 @@
-pragma solidity ^0.4.18; 
+pragma solidity ^0.4.18;
 import '../Libraries/SafeMath.sol';
 import '../Libraries/Math.sol';
 import '../Libraries/RLP.sol';
@@ -6,7 +6,7 @@ import '../Libraries/Merkle.sol';
 import '../Libraries/Merkle.sol';
 import '../Libraries/Validate.sol';
 import '../DataStructures/PriorityQueue.sol';
- 
+
 
 contract RootChain {
     using SafeMath for uint256;
@@ -95,9 +95,9 @@ contract RootChain {
     }
 
     /// @dev txBytes Length 15 RLP encoding of Transaction excluding signatures
-    /// Transaction encoding: 
-    /// [Blknum1, TxIndex1, Oindex1, Amount1, ConfirmSig1, 
-    ///  Blknum2, TxIndex2, Oindex2, Amount2, ConfirmSig2, 
+    /// Transaction encoding:
+    /// [Blknum1, TxIndex1, Oindex1, Amount1, ConfirmSig1,
+    ///  Blknum2, TxIndex2, Oindex2, Amount2, ConfirmSig2,
     ///  NewOwner, Denom1, NewOwner, Denom2, Fee]
     /// @notice owner and value should be encoded in Output 1
     /// @notice hash of txBytes is hashed with a empty signature
@@ -241,7 +241,8 @@ contract RootChain {
         delete exits[priority];
     }
 
-    function finalizeExits()
+    /// @param numIter Number of exits to process
+    function finalizeExits(uint256 numIter)
         public
     {
         // getMin will fail if nothing is in the queue
@@ -249,11 +250,13 @@ contract RootChain {
             return;
         }
 
+        uint256 i = 0;
+
         // retrieve the lowest priority and the appropriate exit struct
         uint256 priority = exitsQueue.getMin();
         exit memory currentExit = exits[priority];
 
-        while (exitsQueue.currentSize() > 0 && (block.timestamp - currentExit.created_at) > 1 weeks) {
+        while (exitsQueue.currentSize() > 0 && (block.timestamp - currentExit.created_at) > 1 weeks && i < numIter) {
             // this can occur if challengeExit is sucessful on an exit
             if (currentExit.owner == address(0)) {
                 exitsQueue.delMin();
@@ -265,7 +268,9 @@ contract RootChain {
                 // move onto the next oldest exit
                 priority = exitsQueue.getMin();
                 currentExit = exits[priority];
+                i += 1;
                 continue; // Prevent incorrect processing of deleted exits.
+                // 35k wei
             }
 
             // prevent a potential DoS attack if from someone purposely reverting a payment
@@ -274,7 +279,7 @@ contract RootChain {
             // if the amount we want to send is greater than the contract's balance - the amount
             // allocated for invalid sends, terminate the function.
             if (amountToAdd > this.balance - totalWithdrawBalance) {
-                return;
+                return; // 32k wei
             }
 
             balances[currentExit.owner] = balances[currentExit.owner].add(amountToAdd);
@@ -293,6 +298,8 @@ contract RootChain {
             }
             priority = exitsQueue.getMin();
             currentExit = exits[priority];
+
+            i += 1;
         }
     }
 
@@ -311,6 +318,14 @@ contract RootChain {
         returns (uint256)
     {
         return balances[msg.sender];
+    }
+
+    function PQSize()
+        public
+        view
+        returns (uint256)
+    {
+        return exitsQueue.currentSize();
     }
 
     function withdraw()
