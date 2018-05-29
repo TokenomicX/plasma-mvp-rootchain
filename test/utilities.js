@@ -33,7 +33,7 @@ let sendUTXO = async function(rootchain, sender, txBytes) {
         {encoding: 'hex'}).slice(2);
     }
 
-    let newBlockNum = await rootchain.currentChildBlock.call();
+    let newBlockNum = (await rootchain.currentChildBlock.call()).toNumber();
     await rootchain.submitBlock(hexToBinary(computedRoot));
 
     // sender signs confirmSig for the transaction
