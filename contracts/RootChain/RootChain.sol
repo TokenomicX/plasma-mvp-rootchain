@@ -181,6 +181,7 @@ contract RootChain {
         uint256 position = 1000000000 * txPos[0] + 10000 * txPos[1] + txPos[2];
         uint256 exitable_at = Math.max(childChain[txPos[0]].created_at + 2 weeks, block.timestamp + 1 weeks);
         uint256 priority = exitable_at << 128 | position;
+        
         // check that the UTXO has not been previously exited
         require(exits[position].state == 0);
         require(exits[position].owner == address(0));
@@ -361,19 +362,6 @@ contract RootChain {
         returns (uint256)
     {
         return balances[msg.sender];
-    }
-
-    // Delete after use
-    function getMin()
-        public
-        view
-        returns (uint256)
-    {
-    	uint256 somenum = exitsQueue.getMin();
-    	assembly {
-   			somenum := and(somenum, div(not(0x0), exp(256, 16)))
-		}
-		return somenum;
     }
 
     function withdraw()
