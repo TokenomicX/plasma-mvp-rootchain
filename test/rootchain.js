@@ -541,7 +541,7 @@ contract('RootChain', async (accounts) => {
         // Check to make sure challenge period has not ended
         let position = 1000000000 * newBlockNum3 + 1;
         let currExit = await rootchain.getExit.call(position);
-        assert.ok((currExit[3].add(604800)) > (await web3.eth.getBlock(await web3.eth.blockNumber)).timestamp)
+        assert.ok(currExit[3].add(604800) > (await web3.eth.getBlock(await web3.eth.blockNumber)).timestamp)
 
         // Start Exit for accounts[2] utxo from newBlockNum2 oindex 1
         let exitSigs2 = sigs2.slice(2) + confirmSignature2.slice(2) + new Buffer(65).toString('hex');
@@ -581,8 +581,8 @@ contract('RootChain', async (accounts) => {
 
         // Check that last exit was processed
         finalizedExit = await rootchain.getExit.call(position);
-        assert.equal(pendingExit[0], accounts[2], "Incorrect finalized exit owner")
-        assert.equal(pendingExit[1], 10000, "Incorrect finalized exit amount")
-        assert.equal(pendingExit[4], 3, "Incorrect finalized exit state.");
+        assert.equal(finalizedExit[0], accounts[2], "Incorrect finalized exit owner")
+        assert.equal(finalizedExit[1], 10000, "Incorrect finalized exit amount")
+        assert.equal(finalizedExit[4], 3, "Incorrect finalized exit state.");
     });
 });
